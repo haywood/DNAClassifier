@@ -5,87 +5,80 @@
 
 function classifier(trainin, testin, trainout, testout)
     
-    [sample_labels, originals] = read_hands(trainin); % read training data
-    samples = transform_hands(originals); % transform it to have useful features
+    [sample_labels, originals] = read_dna(trainin); % read training data
+    samples = transform_dna(originals); % transform it to have useful features
     n_samples = size(samples, 1);
-
-    per_class = 5;
-    per_train_class = 4;
-    correct = zeros(per_class, 1);
+    classes = {};
 
     judge = nn_classifier(); % make the training sample
+    correct = 0;
 
-    for offset = 1:5 % 5-fold cross-val
+    % partition data into training and validation
+    [train_samples, train_labels, validation_samples, test_labels] = split_samples(samples, sample_labels);
 
-        % partition data into training and validation
-        [train_samples, train_labels, validation_samples, test_labels] = split_samples(samples, sample_labels, per_class, per_train_class, offset);
-
-        judge = judge.train(train_labels, train_samples);
-
-        for i = 1:size(validation_samples, 1)
-            prediction = judge.predict(validation_samples(i, :));
-            if strcmp(prediction, test_labels{i})
-                correct(offset) = correct(offset) + 1;
-            end
+    judge = judge.train(train_labels, train_samples);
+    for i = 1:size(validation_samples, 2)
+        prediction = judge.predict(validation_samples{i});
+        if strcmp(prediction, test_labels{i})
+            correct = correct + 1;
         end
-
-        correct(offset) = correct(offset)/size(validation_samples, 1);
     end
 
+    correct = correct/size(validation_samples, 2);
+
     % sort by distance from the mean
-    [s, i] = sort(abs(correct(:) - mean(correct)));
-    o = i(1);
     display 'cross validation results'
     correct
-    average_correct = mean(correct)
-
-    [train_samples, train_labels, validation_samples, test_labels] = split_samples(samples, sample_labels, per_class, per_train_class, o);
-
-    % train on the fold of training data that was closest to the average
-    judge = judge.train(train_labels, train_samples);
-    correct = 0;
+    fprintf(1, 'using %d training and %d testing\n', size(train_samples, 2), size(validation_samples, 2));
 
     % classify every training sample
     out_file = fopen(trainout, 'w');
-    for i = 1:size(samples, 1)
-        prediction = judge.predict(samples(i, :));
-        if strcmp(prediction, sample_labels{i})
-            correct = correct + 1;
-        end
+    for i = 1:size(samples, 2)
+        prediction = judge.predict(samples{i});
         fprintf(out_file, '%s', prediction);
-        fprintf(out_file, ' %d', originals(i, :));
+        fprintf(out_file, ' %s', originals{i});
         fprintf(out_file, '\n');
     end
     fclose(out_file);
 
-    [test_labels, originals] = read_hands(testin); % read test data
-    test_samples = transform_hands(originals); % transform test data to have useful features
+    [test_labels, originals] = read_dna(testin); % read test data
+    test_samples = transform_dna(originals); % transform test data to have useful features
     out_file = fopen(testout, 'w');
 
     % classify test samples
-    for i = 1:size(test_samples, 1)
-        prediction = judge.predict(test_samples(i, :));
+    for i = 1:size(test_samples, 2)
+        prediction = judge.predict(test_samples{i});
         fprintf(out_file, '%s', prediction);
-        fprintf(out_file, ' %d', originals(i, :));
+        fprintf(out_file, ' %s', originals{i});
         fprintf(out_file, '\n');
     end
     fclose(out_file);
 
 % split samples for cross validation
-function [train_samples, train_labels, validation_samples, test_labels] = split_samples(samples, labels, per_class, per_train_class, offset)
 
-    train_samples = [];
+function [train_samples, train_labels, validation_samples, test_labels] = split_samples(samples, labels)
+
+    train_samples = {};
     train_labels = {};
-    validation_samples = [];
+    validation_samples = {};
     test_labels = {};
 
-    for i = 1:size(samples, 1)
-        if mod(i - offset, per_class) < per_train_class
-            train_samples(end+1, :) = samples(i, :);
+    for i = 1:size(samples, 2)
+        if ~ismember(labels{i}, train_labels)
+            train_samples{end+1} = samples{i};
             train_labels{end+1} = labels{i};
         else
-            validation_samples(end+1, :) = samples(i, :);
-            test_labels{end+1} = labels{i};
+            k = find(ismember(labels{i}, train_labels) == 1);
+            s = sum(samples{i} == 'N') + sum(samples{i} == '-');
+            c = sum(train_samples{k} == 'N') + sum(train_samples{k} == '-');
+            if s < c % always favor the sample with less missing data
+                validation_samples{end+1} = train_samples{k};
+                test_labels{end+1} = train_labels{k};
+                train_samples{k} = samples{i};
+                train_labels{k} = labels{i};
+            else
+                validation_samples{end+1} = samples{i};
+                test_labels{end+1} = labels{i};
+            end
         end
     end
-
